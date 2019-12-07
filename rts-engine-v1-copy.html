@@ -1,0 +1,1348 @@
+<html>
+<head>
+	<title>RTS</title>
+	<style type="text/css">
+		canvas {
+			border: black solid 3px;
+		}
+		span {
+			font-size: 12px;
+			font-family: "Arial";
+		}
+		#gridStatus span{
+			color: red;
+		}
+		#editGridStatus span{
+			color: #9932CC;
+		}
+		#showPathStatus span{
+			color: #00F7FF;
+		}
+		#showTileStatus span{
+			color: #DAA520;
+		}
+		#alertStatus span{
+			color: #2f9ccf;
+		}
+	</style>
+</head>
+<body>
+
+<canvas oncontextmenu="return false;" id="canvas"></canvas>
+<div>
+	<button onclick="showGrid()">Grid</button>
+	<button id="editGridBtn" onclick="editGrid()">Edit Grid</button>
+	<button onclick="showUnitPathway()">Show Unit Paths</button>
+	<button onclick="showNextUnitTile()">Show Next Unit Tile</button>
+	<button onclick="showAlert()">Map Edge Alert</button>
+</div>
+<div class="gridStatusDiv">
+	<span>
+		Grid:
+	</span>
+	<span id="gridStatus">
+		OFF
+	</span>
+</div>
+<div class="editGridStatusDiv">
+	<span>
+		Edit Grid:
+	</span>
+	<span id="editGridStatus">
+		OFF
+	</span>
+</div>
+<div class="showPathStatusDiv">
+	<span>
+		Show Unit Paths:
+	</span>
+	<span id="showPathStatus">
+		OFF
+	</span>
+</div>
+<div class="showTileStatusDiv">
+	<span>
+		Show Next Unit Tile:
+	</span>
+	<span id="showTileStatus">
+		OFF
+	</span>
+</div>
+<div class="alertStatusDiv">
+	<span>
+		Map Edge Alert:
+	</span>
+	<span id="alertStatus">
+		<span>ON</span>
+	</span>
+</div>
+<div class="controlDiv">
+	<h4>Controls:</h4>
+	<span>W S A D = Screen Up, Screen Down, Screen Left, Screen Right</span>
+	<br>
+	<span>If you click off the viewport you have to reclick on it for commands to work again</span>
+	<br>
+	<span>Use Edit Grid to add walls</span>
+</div>
+<div class="unitPathIndicator"></div>
+<script type="text/javascript" src="pathfinder.js"></script>
+<script  type="text/javascript">
+
+//SETS FRAME RATE
+(function () {
+    var requestAnimationFrame = window.requestAnimationFrame || window.mozRequestAnimationFrame || window.webkitRequestAnimationFrame || window.msRequestAnimatidaonFrame;
+    window.requestAnimationFrame = requestAnimationFrame;
+})();
+
+// GAME VARIABLES
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+	var canvas = document.getElementById("canvas");
+	var ctx = canvas.getContext("2d");
+
+	canvas.width = 1200;
+	canvas.height = 500;
+
+	var lengthX = 2000 / 25; //1000
+	var lengthY = 1000 / 25; //500
+
+	var tileDimension = 25;
+
+	var mapGrid = []; //map grid
+	var mapGridBinary = []; //0,1s for each tile on the map.
+	var blockedTiles = []; //collection of tiles that are not transverseable
+
+	var unitSelector;
+	var drag = false;  //detects if user is dragging mouse with selection active
+	var deselect = false; //if player deselects units
+	var unitSelected = false; //if player currently has units selected
+	var selectedUnits = []; //holds all units currently selected *for future update
+
+	var validMove = true;
+
+	var attackOpt = false;
+	var cooldownTime = 1000;
+	var cooldownInt = 0;
+	var liveBullets = [];
+
+	var clientX; 
+	var clientY;
+	var currY;
+	var currX;
+
+	var healthBar = { //Health bar information
+		"color": "#66ff33",
+		"empty-color": "red",
+		"height": 5,
+		"width": 25
+	};
+
+	var unit1 = { //player unit
+	    "x": 550,
+	    "y": 150,
+	    "width": 25,
+	    "height": 25,
+	    "enemy": false,
+	    //"ally": false,
+	    "agro": true,
+	    "player-color": "#0066FF",
+	    "object-type": "unit",
+	    "sub-type": "tank",
+	    "speed": 2.5, //**MUST BE MULTIPLE OF 25 FOR THE CURRENT VERSION. 1, 2.5, 5 (etc)
+	    "damage": 25,
+	    "cooldown-active": false,
+	    "cooldown-time": 150,
+	    //"range": 75,
+	    "health": 100,
+	    "underAttack": false,
+	    "color": "#0066FF",
+	    "selectable": true,
+	    "selected": false,
+	    "moving": false,
+	    "currentTile": [(550/25), (150/25)],
+	    "hitTile": [],
+	    "destinationTile": [],
+	    "screenDestinationTile": null,
+	    "targetTile": [],
+	    "currentPath": [],
+		"currentStepInPath": null,
+	    "direction_moving": null,
+	    "status": "halted" //halted, moving, attacking, firing
+	};
+
+	var unit2 = { //enemy
+	    "x": 750,
+	    "y": 200,
+	    "width": 25,
+	    "height": 25,
+	    "enemy": true,
+	    //"ally": false,
+	    "agro": true, //for version 2
+	    "player-color": "#FABA17",
+	    "object-type": "unit",
+	    "sub-type": "tank",
+	    "speed": 2.5 ,//**MUST BE MULTIPLE OF 25 FOR THE CURRENT VERSION. 1, 2.5, 5 (etc)
+	    "damage": 15,
+	    "cooldown-active": false,
+	    "cooldown-time": 150,
+	    //"range": 75,
+	    "health": 100,
+	    "underAttack": false,
+	    "color": "#FABA17",
+	    "selectable": false,
+	    "selected": false,
+	    "moving": false,
+	    "currentTile": [(750/25), (200/25)],
+	    "hitTile": [],
+	    "destinationTile": [],
+	    "screenDestinationTile": null,
+	    "targetTile": [],
+	    "currentPath": [],
+		"currentStepInPath": null,
+	    "direction_moving": null,
+	    "status": "halted" //halted, moving, attacking, firing
+	};
+
+	var globalKey = [unit1, unit2]; //Tracks all objects currently on map. *Needs updated system see NodeJS 1.2.8 for ref
+
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+// MOUSE ACTIONS
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+	function mouseClickDown(e) {
+		if(e.button == 0) { //user clicks left mouse down
+			if(editGridActive){
+				var removed = false;
+				for (var i = 0; i < globalKey.length; i++) {
+					console.log(globalKey[i].currentTile)
+					if(globalKey[i].currentTile.toString() == currentMouseOverTile.toString()){
+						if(globalKey[i]['object-type'] != "unit"){
+							console.log(globalKey[i].currentTile);
+							globalKey.splice(i, 1);
+							removed = true;
+							i = globalKey.length+1;
+						} else {
+							alert('cannot remove units');
+							removed = true;
+						};
+					};
+				};
+				if(!removed){
+					globalKey.push(
+						{
+						    "x": currX,
+						    "y": currY,
+						    "width": 25,
+						    "height": 25,
+						    "enemy": null,
+						    "ally": null,
+						    "player-color": null,
+						    "object-type": "obsticale",
+						    "sub-type": "building",
+						    "speed": null,
+						    "velX": null,
+						    "velY": null,
+						    "damage": null,
+						    "range": null,
+						    "health": null,
+						    "color": "black",
+						    "selectable": false,
+						    "selected": false,
+						    "moving": null,
+						    "currentTile": currentMouseOverTile,
+						    "destinationTile": [],
+	    					"screenDestinationTile": null,
+	    					"hitTile": [],
+						    "targetTile": [],
+						    "currentPath": [],
+						    "currentStepInPath": null,
+						    "direction_moving": null,
+						    "animation": null,
+						    "status": null //halted, moving, attacking
+						}			
+					)
+				}
+				//console.log(blockedTiles);
+				buildGrid();
+			} else {
+				if(!unitSelected){
+					unitSelector = new Path2D(); //path for unit selector box
+					unitSelector.startX = e.pageX - this.offsetLeft;
+					unitSelector.startY = e.pageY - this.offsetTop;
+					drag = true;
+				} else {
+					//if unit IS selected
+					if(validMove || attackOpt){
+							for (var i = 0; i < globalKey.length; i++) {
+								if(globalKey[i].selected){
+									var pathFinderAlgo = new PathFinder.js();
+									pathFinderAlgo.setGrid(mapGridBinary);
+									if(attackOpt){
+										pathFinderAlgo.setAcceptableTiles([0,3]);
+									} else {
+										pathFinderAlgo.setAcceptableTiles([0]);
+									}
+									pathFinderAlgo.enableDiagonals();
+									pathFinderAlgo.disableCornerCutting();
+
+									var resverseUnitX = (((Math.round(globalKey[i].x)+offsetX) / 25));
+									var resverseUnitY = (((Math.round(globalKey[i].y)+offsetY) / 25));
+
+									if(globalKey[i].destinationTile.toString() != currentMouseOverTile.toString()){ //if destination is not the same as current destination
+
+										var roundedUnitX;
+										var roundedUnitY;
+
+										//avoids jerk motion if user spam clicks same direction
+										//perfectly defines current tile even if unit is moving.
+										if(globalKey[i].direction_moving == "l"){
+											roundedUnitX = Math.floor(resverseUnitX);
+											roundedUnitY = Math.round(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "r"){
+											roundedUnitX = Math.ceil(resverseUnitX);
+											roundedUnitY = Math.round(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "up"){
+											roundedUnitX = Math.round(resverseUnitX);
+											roundedUnitY = Math.floor(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "down"){
+											roundedUnitX = Math.round(resverseUnitX);
+											roundedUnitY = Math.ceil(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "tld"){
+											roundedUnitX = Math.floor(resverseUnitX);
+											roundedUnitY = Math.floor(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "trd"){
+											roundedUnitX = Math.ceil(resverseUnitX);
+											roundedUnitY = Math.ceil(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "bld"){
+											roundedUnitX = Math.floor(resverseUnitX);
+											roundedUnitY = Math.ceil(resverseUnitY);
+										} else if(globalKey[i].direction_moving == "brd"){
+											roundedUnitX = Math.ceil(resverseUnitX);
+											roundedUnitY = Math.ceil(resverseUnitY);
+										} else {
+											roundedUnitX = Math.round(resverseUnitX);
+											roundedUnitY = Math.round(resverseUnitY);
+										};
+
+										var destinationX = currentMouseOverTile[0];
+										var destinationY = currentMouseOverTile[1];
+
+										pathFinderAlgo.findPath(roundedUnitX, roundedUnitY, destinationX, destinationY, function( path, interval ) {
+											if (path === null) {
+												alert("Path was not found.");
+												globalKey[interval].moving = false;
+												globalKey[interval].status = "halted";
+											} else { //path can be found
+												if(attackOpt){ //if attacking true
+													if(path.length <= 3 && globalKey[interval].status != "halted"){//if unit already within firing range
+														globalKey[interval].status = "firing";
+													} else {
+														globalKey[interval].status = "attacking";
+														path.splice((path.length-3),3);
+													}
+													globalKey[interval].moving = true;
+													globalKey[interval].currentPath = path;
+													globalKey[interval].currentStepInPath = 0;
+													globalKey[interval].destinationTile = [(path[path.length-1].x*25), (path[path.length-1].y*25)];
+													globalKey[interval].targetTile = [actualMouseOverTile[0], actualMouseOverTile[1]];
+													globalKey[interval].hitTile = [destinationX, destinationY];
+
+												} else {
+													attackOpt = false;
+													globalKey[interval].moving = true;
+													globalKey[interval].status = "moving";
+													globalKey[interval].currentPath = path;
+													globalKey[interval].currentStepInPath = 0;
+													globalKey[interval].targetTile = [];
+													globalKey[interval].destinationTile = [destinationX, destinationY];
+													globalKey[interval].screenDestinationTile = [actualMouseOverTile[0], actualMouseOverTile[1]];
+												}
+												globalKey[interval].selectorOffsetX = 0;
+												globalKey[interval].selectorOffsetY = 0;
+											}
+										}, i);
+
+										pathFinderAlgo.calculate();
+									} else {
+										console.log("continue path");
+									}
+								};
+							};
+					};
+				};
+			}
+		} else if(e.button == 2) { //user clicks right mouse down;
+
+		};
+	};
+
+	function mouseClickUp(e) {
+		if(e.button == 0) { //user releases left mouse click
+			if(!editGridActive){
+				drag = false;
+				var finalUnitSelection = new Path2D();
+				finalUnitSelection.rect(unitSelector.startX, unitSelector.startY, unitSelector.w, unitSelector.h);
+
+				for (var i = 0; i < globalKey.length; i++) {
+					if(globalKey[i].selectable){
+						if(ctx.isPointInPath(finalUnitSelection, globalKey[i].x, globalKey[i].y)) { //If units are inside of selector
+							globalKey[i].selected = true; //set selected to *true for that unit
+							unitSelected = true;
+						};
+					};
+				};
+
+				ctx.clearRect(0,0,canvas.width,canvas.height);
+			};
+		} else if(e.button == 2) { //user releases right mouse click
+			if(!deselect){
+				deselect = true;
+			};
+		};
+	};
+
+	var screenOffsetX = 0;
+	var screenOffsetY = 0;
+	var currentMouseOverTile = [];
+	var actualMouseOverTile = [];
+	var offsetX = 0;
+	var offsetY = 0;
+	var tempOffsetX = 0;
+	var tempOffsetY = 0;
+
+	function mouseMove(e) {
+
+		//build math algo to select middle of tiles not top corner
+
+		clientX = e.clientX;
+		clientY = e.clientY;
+
+		if(drag) { //if selector is being dragged
+			unitSelector.w = (e.pageX - this.offsetLeft) - unitSelector.startX;
+			unitSelector.h = (e.pageY - this.offsetTop) - unitSelector.startY;
+		};
+
+		var tempX = e.clientX
+		var tempY = e.clientY
+
+		if(tempX % 25 != 0 && tempY % 25 != 0){
+			var xDiff = tempX % 25;
+			currX = tempX - xDiff;
+
+			var yDiff = tempY % 25;
+			currY = tempY - yDiff;
+		};
+
+		actualMouseOverTile = [(currX/25), (currY/25)];
+
+		for (var i = 0; i < mapGrid.length; i++) {
+			for (var z = 0; z < mapGrid[i].length; z++) {
+				if(currX == (mapGrid[i][z].x-offsetX) && currY == (mapGrid[i][z].y-offsetY)){
+					currentMouseOverTile = mapGrid[i][z].tile;
+					//console.log(currentMouseOverTile);
+				}
+			}
+		};
+
+		checkMove();
+	};
+
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+// GAME FUNCTIONS
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+	function initGame() { //initialize Game Engine
+		canvas.addEventListener("mousedown", mouseClickDown, false);
+		canvas.addEventListener("mouseup", mouseClickUp, false);
+		canvas.addEventListener("mousemove", mouseMove, false);
+		canvas.tabIndex = 1000;
+		canvas.addEventListener("keydown", function(e) {
+			var event = window.event ? window.event : e;
+		    var arrKey = event.keyCode;
+		    if (arrKey == '87') {
+				// Up
+				moveScreen("screen-up");
+		    }
+		    else if (arrKey == '83') {
+				// Down
+				moveScreen("screen-down");
+		    }
+		    else if (arrKey == '65') {
+				// Left
+				moveScreen("screen-left");
+		    }
+		    else if (arrKey == '68') {
+				// Right
+				moveScreen("screen-right");
+		    }
+		}, false);
+		canvas.style.outline = "none";
+		updateGame();
+	};
+
+	function drawSelector() { //draws unit selector if *drag is true
+		unitSelector.rect(unitSelector.startX, unitSelector.startY, unitSelector.w, unitSelector.h);
+		ctx.strokeStyle = "#DAA520";
+		ctx.strokeRect(unitSelector.startX, unitSelector.startY, unitSelector.w, unitSelector.h);
+	};
+
+	function checkMove(){
+		if(unitSelected) {
+			//console.log([currX/25,currY/25])
+			//console.log(currentMouseOverTile)
+			if(mapGridBinary[currentMouseOverTile[1]][currentMouseOverTile[0]] == 1 || mapGridBinary[currentMouseOverTile[1]][currentMouseOverTile[0]] == 2) { //if cursor crosses obsticale, valid move = false
+				//console.log(mapGridBinary[currentMouseOverTile[1]][currentMouseOverTile[0]]);
+				validMove = false;
+			} else if(mapGridBinary[currentMouseOverTile[1]][currentMouseOverTile[0]] == 3){
+				attackOpt = true;
+			} else { //display movement square if valid unit movement
+				attackOpt = false;
+				validMove = true;
+			}
+		};
+	};
+
+	var screenChangeX = false;
+	var screenChangeY = false;
+
+	function updateGame() {
+		ctx.clearRect(0,0,canvas.width,canvas.height);
+
+		if(tempOffsetX < offsetX){
+			tempOffsetX = offsetX;
+			screenChangeXadd = true;
+		} else {
+			screenChangeXadd = false;
+		};
+
+		if(tempOffsetX > offsetX){
+			tempOffsetX = offsetX;
+			screenChangeXsub = true;
+		} else {
+			screenChangeXsub = false;
+		};
+
+		if(tempOffsetY < offsetY){
+			tempOffsetY = offsetY;
+			screenChangeYadd = true;
+		} else {
+			screenChangeYadd = false;
+		};
+
+		if(tempOffsetY > offsetY){
+			tempOffsetY = offsetY;
+			screenChangeYsub = true;
+		} else {
+			screenChangeYsub = false;
+		};
+
+		if(drag){
+			drawSelector();
+		};
+		
+		for (var i = 0; i < globalKey.length; i++) {
+			if(deselect) {
+				globalKey[i].selected = false;
+		    	unitSelected = false;
+		    	validMove = true;
+		    	ctx.clearRect(0,0,canvas.width,canvas.height);
+			};
+		};
+
+		for (var i = 0; i < globalKey.length; i++) {
+
+			if(globalKey[i].status == "halted"){
+				ctx.beginPath();
+				ctx.fillStyle = globalKey[i].color;
+				ctx.fillRect(globalKey[i].x, globalKey[i].y, globalKey[i].width, globalKey[i].height);
+				ctx.closePath();
+			}
+
+			if(globalKey[i].status == "moving" || globalKey[i].status == "attacking"){
+
+				//draws unit path
+				if(showPath){
+					for (var v = 1; v < globalKey[i].currentPath.length; v++) {
+						ctx.beginPath();
+						ctx.setLineDash([6]);
+						ctx.fillStyle = "#00F7FF";
+						ctx.fillRect(((globalKey[i].currentPath[v].x * 25)-offsetX), ((globalKey[i].currentPath[v].y * 25)-offsetY), 25, 25);
+						ctx.closePath();
+					};
+				};
+
+				var currStepX = ((globalKey[i].currentPath[globalKey[i].currentStepInPath].x * 25)-offsetX);
+				var currStepY = ((globalKey[i].currentPath[globalKey[i].currentStepInPath].y * 25)-offsetY);
+
+				if(globalKey[i].currentStepInPath==null){
+					globalKey[i].currentStepInPath = 1;
+				} else if(globalKey[i].x ==  currStepX && globalKey[i].y == currStepY){
+					if((globalKey[i].currentStepInPath+1) == globalKey[i].currentPath.length){
+						if(globalKey[i].status != "halted"){
+							if(globalKey[i].status == "attacking"){
+								globalKey[i].status = "firing";
+							};
+						} else {
+							globalKey[i].selectorOffsetX = 0;
+							globalKey[i].selectorOffsetY = 0;
+							globalKey[i]["currentTile"] = [globalKey[i].currentPath[globalKey[i].currentStepInPath].x, globalKey[i].currentPath[globalKey[i].currentStepInPath].y];
+							globalKey[i].moving = false;
+							globalKey[i].currentPath = [];
+							globalKey[i].currentStepInPath = null;
+							globalKey[i].status = "halted";
+						}
+					} else {
+						globalKey[i].currentStepInPath = globalKey[i].currentStepInPath + 1;
+					}
+
+					buildGrid();
+					buildRadar();
+					checkMove();
+				} else {
+
+					var pathTileLocX = ((globalKey[i].currentPath[globalKey[i].currentStepInPath].x * 25)-offsetX);
+					var pathTileLocY = ((globalKey[i].currentPath[globalKey[i].currentStepInPath].y * 25)-offsetY);
+
+					if(showNextTile){
+						ctx.beginPath();
+						ctx.setLineDash([6]);
+						ctx.fillStyle = "#FBEE61";
+						ctx.fillRect(pathTileLocX, pathTileLocY, 25, 25);
+						ctx.closePath();
+					}
+				}
+
+				//counter-clock wise
+				//----------------
+				//| 1   | 8   |  7  |
+				//----------------
+				//|  2  | me |  6  |
+				//----------------
+				//|  3  | 4   |  5  |
+				//----------------
+
+				if(pathTileLocX == globalKey[i].x && pathTileLocY < globalKey[i].y){ //up
+					globalKey[i].y-=globalKey[i].speed;
+					globalKey[i].direction_moving = "up";
+				} else if(pathTileLocX < globalKey[i].x && pathTileLocY < globalKey[i].y){ //top-left-diagonal
+					globalKey[i].x-=globalKey[i].speed;
+					globalKey[i].y-=globalKey[i].speed;
+					globalKey[i].direction_moving = "tld";
+				} else if(pathTileLocX < globalKey[i].x && pathTileLocY == globalKey[i].y){ //left
+					globalKey[i].x-=globalKey[i].speed;
+					globalKey[i].direction_moving = "l";
+				} else if(pathTileLocX < globalKey[i].x && pathTileLocY > globalKey[i].y){ //bottom-left-diagonal
+					globalKey[i].x-=globalKey[i].speed;
+					globalKey[i].y+=globalKey[i].speed;
+					globalKey[i].direction_moving = "bld";
+				} else if(pathTileLocX == globalKey[i].x && pathTileLocY > globalKey[i].y){ //down
+					globalKey[i].y+=globalKey[i].speed;
+					globalKey[i].direction_moving = "down";
+				} else if(pathTileLocX > globalKey[i].x && pathTileLocY > globalKey[i].y){ //bottom-right-diagonal
+					globalKey[i].x+=globalKey[i].speed;
+					globalKey[i].y+=globalKey[i].speed;
+					globalKey[i].direction_moving = "brd";
+				} else if(pathTileLocX > globalKey[i].x && pathTileLocY == globalKey[i].y){ //right
+					globalKey[i].x+=globalKey[i].speed;
+					globalKey[i].direction_moving = "r";
+				} else if(pathTileLocX > globalKey[i].x && pathTileLocY < globalKey[i].y){ //top-right-diagonal
+					globalKey[i].x+=globalKey[i].speed;
+					globalKey[i].y-=globalKey[i].speed;
+					globalKey[i].direction_moving = "trd";
+				}
+
+			};
+
+			var currHealth;
+
+			if(globalKey[i]["object-type"] != "unit"){
+				ctx.beginPath();
+				ctx.fillStyle = globalKey[i].color;
+				ctx.fillRect(globalKey[i].x, globalKey[i].y, globalKey[i].width, globalKey[i].height);
+				ctx.closePath();
+			} else {
+
+				//declares if unit is under attack
+				for (var z = 0; z < globalKey.length; z++) {
+					if(globalKey[i].hitTile.toString() == globalKey[z].currentTile.toString()){
+						globalKey[z].underAttack = true;
+					}
+				};
+
+				//draws health bar for unit
+				if(globalKey[i].selected || globalKey[i].underAttack){
+
+		    		var currDmg = 100 - globalKey[i].health;
+		    		var dmgTaken = currDmg / 4;
+		    		if (dmgTaken == 4){
+		    			currHealth = healthBar.width;
+		    		} else {
+		    			currHealth = healthBar.width - dmgTaken;
+		    		}
+
+					ctx.beginPath();
+		    		ctx.fillStyle = healthBar["empty-color"];
+		    		ctx.fillRect(globalKey[i].x, ((globalKey[i].y-healthBar.height)-3), healthBar.width, healthBar.height);
+		    		ctx.closePath();
+
+					ctx.beginPath();
+		    		ctx.fillStyle = healthBar.color;
+		    		ctx.fillRect(globalKey[i].x, ((globalKey[i].y-healthBar.height)-3), currHealth, healthBar.height);
+		    		ctx.closePath();
+				};
+
+				if(globalKey[i].selected) {
+					if(screenChangeXadd){
+						globalKey[i].selectorOffsetX += 25; 
+					} else if (screenChangeXsub){
+						globalKey[i].selectorOffsetX -= 25; 
+					}
+					if(screenChangeYadd){
+						globalKey[i].selectorOffsetY += 25;
+					} else if(screenChangeYsub){
+						globalKey[i].selectorOffsetY -= 25;
+					}
+
+					if(globalKey[i].status == "moving"){
+
+						//draws selected tile outline with offset
+						ctx.beginPath();
+						ctx.setLineDash([6]);
+						ctx.strokeStyle = "lime";
+						ctx.strokeRect(((globalKey[i].screenDestinationTile[0]*25)-globalKey[i].selectorOffsetX), ((globalKey[i].screenDestinationTile[1]*25)-globalKey[i].selectorOffsetY), 25, 25);
+						ctx.closePath();
+
+						//draws green selection line with offset
+						ctx.setLineDash([0]);
+						ctx.moveTo(globalKey[i].x+12, globalKey[i].y+12);
+						ctx.lineTo((((globalKey[i].screenDestinationTile[0]*25)+12)-globalKey[i].selectorOffsetX), (((globalKey[i].screenDestinationTile[1]*25)+12)-globalKey[i].selectorOffsetY));
+						ctx.stroke();
+						ctx.closePath();
+					};
+
+					if(globalKey[i].status == "attacking" || globalKey[i].status == "firing"){
+
+						//draws selected tile outline
+						ctx.beginPath();
+						ctx.setLineDash([6]);
+						ctx.lineWidth = "2";
+						ctx.strokeStyle = "red";
+						ctx.strokeRect(((globalKey[i].targetTile[0]*25)-globalKey[i].selectorOffsetX), ((globalKey[i].targetTile[1]*25)-globalKey[i].selectorOffsetY), 25, 25);
+						ctx.closePath();
+						ctx.lineWidth = "1";
+
+						if(globalKey[i].status == "attacking"){
+							//draws red selection line
+							ctx.setLineDash([0]);
+							ctx.moveTo(globalKey[i].x+12, globalKey[i].y+12);
+							ctx.lineTo((((globalKey[i].targetTile[0]*25)+12)), (((globalKey[i].targetTile[1]*25)+12)));
+							ctx.stroke();
+							ctx.closePath();
+						}
+					}
+				};
+
+				//draws unit moving
+				ctx.beginPath();
+				ctx.fillStyle = globalKey[i]["player-color"];
+				ctx.fillRect(globalKey[i].x, globalKey[i].y, globalKey[i].width, globalKey[i].height);
+				ctx.closePath();
+
+				if(globalKey[i]["cooldown-active"]){
+					cooldownTime = globalKey[i]["cooldown-time"];
+					cooldownInt++;
+					if(cooldownInt == cooldownTime){
+						globalKey[i]["cooldown-active"] = false;
+						cooldownInt = 0;
+					}
+				}
+
+				//console.log(globalKey[i])
+				if(globalKey[i].status == "firing"){
+					if(!globalKey[i]["cooldown-active"]){
+						var fireLocX = (globalKey[i].x+10)
+						var fireLocY = (globalKey[i].y+10)
+						var targetLocX = ((globalKey[i].targetTile[0]*25)+10)-globalKey[i].selectorOffsetX
+						var targetLocY = ((globalKey[i].targetTile[1]*25)+10)-globalKey[i].selectorOffsetY
+
+						console.log(targetLocX)
+						console.log(targetLocY)
+					    liveBullets.push(Bullet({
+					        speed: 1,
+					        moving: false,
+					        x: parseInt(fireLocX),
+					        y: parseInt(fireLocY),
+					        targetX:parseInt(targetLocX),
+					        targetY:parseInt(targetLocY)
+					    }));
+
+					    globalKey[i]["cooldown-active"] = true;
+					}
+				};
+			};
+
+			ctx.lineWidth = "1";
+
+			if(currHealth <= 0){
+				globalKey.pop(i);
+				attackOpt = false;
+				globalKey[0].status = "halted";
+				globalKey[0].selectorOffsetX = 0;
+				globalKey[0].selectorOffsetY = 0;
+				globalKey[0]["targetTile"] = [];
+				buildGrid();
+			}
+		};
+
+
+		//firing commands
+		liveBullets.forEach(function(bullet) {
+	        bullet.move();
+	    });
+
+	    //deletes bullets after they are not active anymore
+	    liveBullets = liveBullets.filter(function(bullet) {
+	        return bullet.active;
+	    });
+
+	    liveBullets.forEach(function(bullet) {
+	        bullet.draw();
+	    });
+
+
+		if(gridActive){
+			ctx.setLineDash([6]);
+			for (var i = 0; i < mapGrid.length; i++) {
+				for (var x = 0; x < mapGrid[i].length; x++) {
+					ctx.beginPath();
+					ctx.strokeStyle = "red";
+					ctx.strokeRect(mapGrid[i][x].x, mapGrid[i][x].y, 25, 25);
+					ctx.closePath();
+				}
+			};
+		};
+
+		if(editGridActive){
+			gridActive=false;
+			ctx.setLineDash([6]);
+			for (var i = 0; i < mapGrid.length; i++) {
+				for (var x = 0; x < mapGrid[i].length; x++) {
+					ctx.beginPath();
+					ctx.strokeStyle = "#9932CC";
+					ctx.strokeRect(mapGrid[i][x].x, mapGrid[i][x].y, 25, 25);
+					ctx.closePath();
+				}
+			};
+			ctx.setLineDash([0]);
+			ctx.strokeStyle = "black";
+			ctx.strokeRect(currX, currY, 25,25);
+
+			ctx.fillStyle = "black";
+			ctx.font = "12px Arial";
+			var reverseX = currX / 25;
+			var reverseY = currY / 25;
+			var string = "EDIT ("+reverseX+", "+reverseY+")";
+			ctx.fillText(string, clientX, clientY);
+		};
+
+		if(unitSelected){
+			if(!validMove){ //if valid move is false, display red X
+				ctx.setLineDash([0]);
+				ctx.strokeStyle = "red";
+				ctx.strokeRect(actualMouseOverTile[0]*25, actualMouseOverTile[1]*25, 25,25);
+				ctx.fillStyle = "red";
+				ctx.font = "12px Arial";
+				ctx.fillText("X("+currentMouseOverTile[0]+", "+currentMouseOverTile[1]+")", clientX, clientY);
+			} else if(attackOpt){
+				ctx.setLineDash([6]);
+				ctx.strokeStyle = "red";
+				ctx.strokeRect(actualMouseOverTile[0]*25, actualMouseOverTile[1]*25, 25,25);
+
+				ctx.fillStyle = "red";
+				ctx.font = "12px Arial";
+				var reverseX = currX / 25;
+				var reverseY = currY / 25;
+				var string = "attack ("+reverseX+", "+reverseY+")";
+				ctx.fillText(string, clientX, clientY);
+			} else {
+				ctx.fillStyle = "#9932CC";
+				ctx.font = "12px Arial";
+				var string = "move here ("+currentMouseOverTile[0]+", "+currentMouseOverTile[1]+")";
+				ctx.fillText(string, clientX, clientY);
+				ctx.setLineDash([6]);
+				ctx.strokeStyle = "#9932CC";
+				ctx.strokeRect(currX, currY, 25,25);
+			};
+		};
+
+		deselect = false;
+
+		buildDashboard();
+
+		requestAnimationFrame(updateGame);
+
+	};
+
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+// OBJECT FUNCTIONS
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+	function Bullet(I) {
+		console.log('yooooooooooooooooooooooo')
+	    I.active = true;
+
+	    I.width = 5;
+	    I.height = 5;
+	    I.color = "gray";
+	    I.moving = false;
+
+	    I.draw = function() {
+	        // var bulletImg = new Image(); 
+
+	        // bulletImg.src = "bullet.png";
+
+	        // ctx.drawImage(bulletImg, this.x, this.y, this.width, this.height);
+
+	        ctx.fillStyle = this.color;
+	        ctx.fillRect(this.x, this.y, this.width, this.height);
+	    };
+
+	    I.move = function() {
+
+	    	if(!I.moving){
+		    	I.moving = true;
+	    		I.distanceX = I.x - I.targetX;
+	    		I.distanceY = I.y - I.targetY;
+	    		I.diff = I.distanceX/I.distanceY;
+    		}
+
+    		//======================================================================================
+    		if(Math.round(I.x) != I.targetX || Math.round(I.y) != I.targetY){
+    			if(I.x < I.targetX && I.y < I.targetY || I.x > I.targetX && I.y < I.targetY){//
+		    		I.x+=I.diff;
+		    		I.y+=1;
+		    	} else if(I.x > I.targetX && I.y > I.targetY || I.x < I.targetX && I.y > I.targetY){//
+		    		I.x-=I.diff
+		    		I.y-=1;
+				} else if(I.targetX == I.x && I.targetY < I.y){ //up
+					I.y-=3;
+				} else if(I.targetX == I.x && I.targetY > I.y){ //down
+					I.y+=3;
+				} else if(I.targetX < I.x && I.targetY == I.y){ //left
+					I.x-=3;
+				} else if(I.targetX > I.x && I.targetY == I.y){ //right
+					I.x+=3;
+				}
+    		} else {
+				//I.moving = false;
+				this.hit();
+			}
+			//======================================================================================
+
+
+	       //I.active = I.active && I.moving;
+	    };
+
+	    I.hit = function() {
+	        this.active = false;
+	        for (var i = 0; i < globalKey.length; i++) {
+	        	if(globalKey[i]["object-type"] == "unit"){
+	        		var revBulletX = (this.targetX - 10) / 25;
+	        		var revBulletY = (this.targetY - 10) / 25;
+	        		var bulletHitArr = [revBulletX,revBulletY];
+	        		if(globalKey[i].currentTile.toString() == bulletHitArr.toString()){
+	        			globalKey[i].health -= unit1["damage"];
+	        		}
+	        	}
+	        }
+	        //I.active = I.active && I.moving;
+	    };
+
+	    return I;
+	};
+
+	function Tank(I) {
+
+	    return I;
+	};
+
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+// CONTROL PANEL FUNCTIONS
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+	//-note
+	//Only infantry will be able to pass onto the same tile (tile maybe becomes a 5? [unit sharable and crushable])
+	//Bigger units cause tile to become 1
+	//Need way to change blocked boolean as units move
+	var editGridActive = false;
+	function editGrid(){
+		if(editGridActive){
+			document.getElementById("editGridStatus").innerHTML = "OFF";
+			document.getElementById("gridStatus").innerHTML = "OFF";
+			document.getElementById("editGridBtn").innerHTML = "Edit Grid";
+			editGridActive = false;
+		} else {
+			deselect = true;
+			for (var i = 0; i < globalKey.length; i++) {
+				if(globalKey[i].destinationTile.length != 0){
+					globalKey[i].x = (globalKey[i].destinationTile[0] * 25);
+					globalKey[i].y = (globalKey[i].destinationTile[1] * 25);
+					globalKey[i].currentTile = [globalKey[i].destinationTile[0], globalKey[i].destinationTile[1]];
+					globalKey[i].status = "halted";
+					globalKey[i].moving = false;
+					globalKey[i].currentPath = null;
+					globalKey[i].currentStepInPath = null;
+				}
+			}
+			document.getElementById("gridStatus").innerHTML = "OFF";
+			document.getElementById("editGridStatus").innerHTML = "<span>ACTIVE</span>";
+			document.getElementById("editGridBtn").innerHTML = "Confirm Grid";
+			gridActive = false;
+			editGridActive = true;
+		};
+	}
+
+	var showPath = false;
+	function showUnitPathway(){
+		if(showPath){
+			document.getElementById("showPathStatus").innerHTML = "OFF";
+			showPath = false;
+		} else {
+			document.getElementById("showPathStatus").innerHTML  = "<span>ON</span>";
+			showPath = true;
+		};
+	}
+
+	var showNextTile = false;
+	function showNextUnitTile(){
+		if(showNextTile){
+			document.getElementById("showTileStatus").innerHTML = "OFF";
+			showNextTile = false;
+		} else {
+			document.getElementById("showTileStatus").innerHTML = "<span>ON</span>";
+			showNextTile = true;
+		};
+	}
+
+	var gridActive = false;
+	function showGrid(){
+		if(gridActive){
+			document.getElementById("gridStatus").innerHTML = "OFF";
+			gridActive = false;
+		} else {
+			document.getElementById("gridStatus").innerHTML = "<span>ON</span>";
+			gridActive = true;
+		};
+	};
+
+	var alertActive = true;
+	function showAlert(){
+		if(alertActive){
+			document.getElementById("alertStatus").innerHTML = "OFF";
+			alertActive = false;
+		} else {
+			document.getElementById("alertStatus").innerHTML = "<span>ON</span>";
+			alertActive = true;
+		};
+	};
+
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+// SPECIAL FUNCTIONS
+	//+++++++++++++++++++++++++++++++++++++++++++++++++++++++	
+
+	//have perm blocked and temp block next version
+	function buildGrid(){
+		mapGrid = [];
+		mapGridBinary = [];
+		blockedTiles = [];
+		//Builds collection of non-traversable tiles
+		for (var i = 0; i < globalKey.length; i++) { //sift through all global objects
+			//if(globalKey[i]['object-type'] == "obsticale"){
+				if(globalKey[i].width > 25){
+					var obstiWidth = globalKey[i].width / 25;
+				} else {
+					var obstiWidth = 1;
+				}
+				if(globalKey[i].height > 25){
+					var obstiHeight = globalKey[i].height / 25;
+				} else {
+					var obstiHeight = 1;
+				}
+
+				var obstiX = globalKey[i].x / 25;
+				var obstiY = globalKey[i].y / 25;
+
+				for (var z = 0; z < obstiWidth; z++) {
+					var currObstiX = obstiX+z;
+					for (var y = 0; y < obstiHeight; y++) {
+						var currObstiY = obstiY+y;
+						//if(!blockedTiles.includes([currObstiX, currObstiY])){
+							globalKey[i].currentTile = [(currObstiX+(offsetX/25)), (currObstiY+(offsetY/25))];
+							blockedTiles.push([(currObstiX+(offsetX/25)), (currObstiY+(offsetY/25))]);
+						//};
+					};
+				};
+
+				//console.log(blockedTiles);
+			//};
+		};
+
+		//===================
+		//issue:
+		//PATH FOLLOWS U WHEN U MOVING BRUH
+		//clean up attack options
+		//clean up dashboard options
+
+		//obj: put orange guy on other side of map, move and attack him
+		//obj2: place grid markers all over map
+		//obj3: randomly place all blocks on map //TOO LAGGY FUCK
+
+		//Builds map grid with data for each tile
+		for (var y = 0; y < lengthY; y++) {
+			var mapRow = [];
+			var mapRowBinary = [];
+			for (var x = 0; x < lengthX; x++) {
+				var isBlocked = 0;
+				var xLoc = tileDimension * x;
+				var yLoc = tileDimension * y;
+				var currTileLoc = [x, y];
+				for (var t = 0; t < blockedTiles.length; t++) {
+					if(blockedTiles[t].toString() == currTileLoc.toString()){
+						for (var i = 0; i < globalKey.length; i++) {
+							var compareTile = [(globalKey[i].currentTile[0]+(offsetX/25)), (globalKey[i].currentTile[1]+(offsetY/25))];
+							// console.log("------------------no HIT-------------------------")
+							// console.log(blockedTiles[t].toString());
+							// console.log(globalKey[i].currentTile.toString());
+							// console.log(compareTile);
+							// console.log("-------------------------------------------")
+							if(blockedTiles[t].toString() == globalKey[i].currentTile.toString()){
+								if(globalKey[i]['object-type'] == 'unit'){
+									if(globalKey[i]['enemy'] == true) {
+										isBlocked = 3;
+									} else {
+										isBlocked = 2;
+									};
+								} else {
+									isBlocked = 1;
+								};
+							};
+						};
+						t = blockedTiles.length;
+					};
+				};
+				//0 means its open, 1 means blocked, 2 is my own unit(s), 3 is enemy
+				//This is because if blocks are weighted (moving over ore or water slows down unit) we can add 2,3,4,etc
+				mapRow.push({blocked: isBlocked, tile: currTileLoc, x: xLoc, y: yLoc});
+				mapRowBinary.push(isBlocked);
+			};
+			mapGrid.push(mapRow);
+			mapGridBinary.push(mapRowBinary);
+		};
+		// console.log(mapGrid);
+		// console.log(mapGridBinary);
+		// console.log(blockedTiles);
+	};
+
+	function moveScreen(direction){
+		var move;
+		var vector;
+		if(direction == "screen-right"){
+			if(screenOffsetX == 40){
+				if(alertActive){
+					alert('map edge');
+				}
+			} else {
+				move = -25;
+				vector = "x";
+				screenOffsetX++;
+			}
+		} else if(direction == "screen-left"){
+			if(screenOffsetX == 0){
+				if(alertActive){
+					alert('map edge');
+				}
+			} else {
+				move = 25;
+				vector = "x";
+				screenOffsetX--;				
+			}
+		} else if(direction == "screen-up"){
+			if(screenOffsetY == 0){
+				if(alertActive){
+					alert('map edge');
+				}
+			} else {
+				move = 25;
+				vector = "y";
+				screenOffsetY--;
+			}
+		} else if(direction == "screen-down"){
+			if(screenOffsetY == 20){
+				if(alertActive){
+					alert('map edge');
+				}
+			} else {
+				move = -25;
+				vector = "y";
+				screenOffsetY++;
+			}
+		}
+		for (var i = 0; i < globalKey.length; i++) {
+			if(vector == "x"){
+				globalKey[i].x+=move;
+			} else if(vector == "y"){
+				globalKey[i].y+=move;
+			}
+		}
+
+		offsetX = screenOffsetX * 25;
+		offsetY = screenOffsetY * 25;
+
+		for (var i = 0; i < mapGrid.length; i++) {
+			for (var z = 0; z < mapGrid[i].length; z++) {
+				if(currX == (mapGrid[i][z].x-offsetX) && currY == (mapGrid[i][z].y-offsetY)){
+					currentMouseOverTile = mapGrid[i][z].tile;
+				}
+			}
+		}
+
+		buildGrid();
+		checkMove();//Resets tile value of current mouse position
+		// console.log(mapGrid);
+		// console.log(mapGridBinary);
+		// console.log(blockedTiles);
+	};
+
+	function buildDashboard(){
+		ctx.lineWidth = 5;
+		ctx.setLineDash([0]);
+		ctx.strokeStyle = "black";
+		ctx.fillStyle = "white";
+
+		//main box
+		ctx.beginPath();
+		ctx.strokeRect(1000, 0, 200, 500);
+		ctx.fillRect(1000, 0, 200, 500);
+		ctx.closePath();
+
+		ctx.lineWidth = 3;
+
+		// //radar box
+		buildRadar();
+
+		ctx.fillStyle = "#D3D3D3";
+
+
+		//credits box
+		ctx.beginPath();
+		ctx.strokeRect(1000, 0, 200, 25);
+		ctx.fillRect(1000, 0, 200, 25);
+		ctx.closePath();
+
+		//tabs
+		ctx.beginPath();
+		ctx.strokeRect(1000, 125, 50, 75);
+		ctx.fillRect(1000, 125, 50, 75);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1050, 125, 50, 75);
+		ctx.fillRect(1050, 125, 50, 75);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1100, 125, 50, 75);
+		ctx.fillRect(1100, 125, 50, 75);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1150, 125, 50, 75);
+		ctx.fillRect(1150, 125, 50, 75);
+		ctx.closePath();
+
+		//build options
+		ctx.beginPath();
+		ctx.strokeRect(1000, 200, 100, 100);
+		ctx.fillRect(1000, 200, 100, 100);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1100, 200, 100, 100);
+		ctx.fillRect(1100, 200, 100, 100);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1000, 300, 100, 100);
+		ctx.fillRect(1000, 300, 100, 100);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1100, 300, 100, 100);
+		ctx.fillRect(1100, 300, 100, 100);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1000, 400, 100, 100);
+		ctx.fillRect(1000, 400, 100, 100);
+		ctx.closePath();
+		ctx.beginPath();
+		ctx.strokeRect(1100, 400, 100, 100);
+		ctx.fillRect(1100, 400, 100, 100);
+		ctx.closePath();
+
+		ctx.lineWidth = 1;
+
+	};
+
+	//RADAR IS FUCKED CAUSE IT GOES OFF CURRENT TILES AND WE ARE NOT USING THEM
+	function buildRadar(){
+		for (var i = 0; i < mapGridBinary.length; i++) {
+			for (var x = 0; x < mapGridBinary[i].length; x++) {
+				baseRadarX = 1000;
+				baseRadarY = 25;
+				radarX = x * 2.5;
+				radarY = i * 2.5;
+				currRadarX = baseRadarX + radarX;
+				currRadarY = baseRadarY + radarY;
+
+				if(mapGridBinary[i][x] == 0){
+					ctx.beginPath();
+					ctx.fillStyle = "white";
+					ctx.fillRect(currRadarX, currRadarY, 2.5, 2.5);
+					ctx.closePath();
+				} else if (mapGridBinary[i][x] == 1){
+					ctx.beginPath();
+					ctx.fillStyle = "black";
+					ctx.fillRect(currRadarX, currRadarY, 2.5, 2.5);
+					ctx.closePath();
+				} else if (mapGridBinary[i][x] == 2){
+					ctx.beginPath();
+					ctx.fillStyle = "#0066FF";
+					ctx.fillRect(currRadarX, currRadarY, 2.5, 2.5);
+					ctx.closePath();
+				} else if (mapGridBinary[i][x] == 3){
+					ctx.beginPath();
+					ctx.fillStyle = "#FABA17";
+					ctx.fillRect(currRadarX, currRadarY, 2.5, 2.5);
+					ctx.closePath();
+				}
+				//console.log(currRadarY)
+			}
+		}
+
+		//builds square on radar
+		ctx.beginPath();
+		ctx.lineWidth = 1;
+		ctx.strokeStyle = "black";
+		var radarSqOffsetX = 2.5 * screenOffsetX;
+		var radarSqOffsetY = 2.5 * screenOffsetY;
+		var radarSqPosX = 1000 + radarSqOffsetX; 
+		var radarSqPosY = 25 + radarSqOffsetY;
+		ctx.strokeRect(radarSqPosX, radarSqPosY, 102.5, 50);
+		ctx.closePath();
+	}
+
+	buildDashboard();
+	buildGrid();
+	initGame(); //initializes Game Engine - (runs initGame Function)
+</script>
+</body>
+</html>
